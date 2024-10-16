@@ -1,9 +1,13 @@
 package c4s.process
 
 import cats.effect._
+import cats.effect.kernel.{Resource, Sync}
 import org.typelevel.log4cats.testing.TestingLogger
 import org.typelevel.log4cats.testing.TestingLogger._
 import munit.CatsEffectSuite
+
+import java.util.concurrent.{ExecutorService, Executors}
+import scala.concurrent.ExecutionContext
 
 class LoggerProcessSpec extends CatsEffectSuite {
   import c4s.process.syntax._
@@ -35,10 +39,17 @@ class LoggerProcessSpec extends CatsEffectSuite {
     }
   }
 
-  def withProcess: Resource[IO, (Process[IO], TestingLogger[IO])] = {
+  lazy val withProcess: Resource[IO, (Process[IO], TestingLogger[IO])] = {
     val logger = TestingLogger.impl[IO]()
-    Blocker[IO]
+    fixedThreadPool[IO](3)
       .map(x => (Process.impl[IO](x).withLogger(logger), logger))
   }
 
+  private def fixedThreadPool[F[_]](size: Int)(
+    implicit sf: Sync[F]
+  ): Resource[F, ExecutionContext] = {
+    val alloc = sf.delay(Executors.newFixedThreadPool(size))
+    val free  = (es: ExecutorService) => sf.delay(es.shutdown())
+    Resource.make(alloc)(free).map(ExecutionContext.fromExecutor)
+  }
 }

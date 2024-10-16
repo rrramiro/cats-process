@@ -1,7 +1,6 @@
 package c4s.process
 
 import cats.effect._
-import fs2.Stream
 
 /**
  * Contains all the outputs returned when executing a [[c4s.process.Process]]
@@ -12,8 +11,8 @@ import fs2.Stream
  */
 final case class ProcessResult[F[_]](
     exitCode: ExitCode,
-    output: Stream[F, Byte],
-    error: Stream[F, Byte]
+    output: fs2.Stream[F, Byte],
+    error: fs2.Stream[F, Byte]
 )
 
 final case class ProcessFailure[F[_]](result: ProcessResult[F])

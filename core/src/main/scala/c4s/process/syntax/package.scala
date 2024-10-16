@@ -27,7 +27,7 @@ package object syntax {
      */
     final def asString: F[String] =
       stream
-        .through(text.utf8Decode)
+        .through(text.utf8.decode)
         .compile
         .toVector
         .map(_.mkString)

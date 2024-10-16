@@ -1,13 +1,13 @@
-val scalaV = "2.13.7"
+val scalaV = "2.13.15"
 
-val catsV = "2.6.1"
-val catsEffectV = "2.5.4"
-val fs2V = "2.5.10"
-val munitV = "0.7.29"
-val munitCatsEffectV = "0.3.0"
-val log4catsV = "1.3.1"
+val catsV = "2.12.0"
+val catsEffectV = "3.5.4"
+val fs2V = "3.11.0"
+val munitV = "1.0.2"
+val munitCatsEffectV = "2.0.0"
+val log4catsV = "2.7.0"
 
-val kindProjectorV = "0.13.2"
+val kindProjectorV = "0.13.3"
 val betterMonadicForV = "0.3.1"
 
 // Projects
@@ -44,23 +44,23 @@ lazy val site = project
     scalaVersion := scalaV,
     makeSite := makeSite.dependsOn(mdoc.toTask("")).value,
     mdocIn := baseDirectory.value / "docs",
-    sourceDirectory in (Compile, paradox) := mdocOut.value,
+    Compile / paradox / sourceDirectory  := mdocOut.value,
     Compile / paradoxMaterialTheme ~= {
       _.withRepository(uri("https://github.com/cats4scala/cats-process"))
     },
-    paradoxProperties += ("project.version.stable" -> previousStableVersion.value.get),
-    siteSubdirName in SiteScaladoc := "api"
+    paradoxProperties += ("project.version.stable" -> previousStableVersion.value.get)
+    //SiteScaladoc / siteSubdirName  := "api"
   )
   .settings(
-    SiteScaladocPlugin.scaladocSettings(Root, mappings in (Compile, packageDoc) in core, "api"),
-    SiteScaladocPlugin.scaladocSettings(Core, mappings in (Compile, packageDoc) in core, "api/core")
+    SiteScaladocPlugin.scaladocSettings(Root, core / Compile / packageDoc / mappings, "api"),
+    SiteScaladocPlugin.scaladocSettings(Core, core / Compile / packageDoc / mappings, "api/core")
   )
   .dependsOn(core)
 
 // General Settings
 lazy val commonSettings = Seq(
   scalaVersion := scalaV,
-  crossScalaVersions := Seq(scalaV, "2.12.15"),
+  //crossScalaVersions := Seq(scalaV, "2.12.15"),
   addCompilerPlugin("org.typelevel" %% "kind-projector"     % kindProjectorV cross CrossVersion.full),
   addCompilerPlugin("com.olegpy"    %% "better-monadic-for" % betterMonadicForV),
   libraryDependencies ++= Seq(
@@ -92,17 +92,21 @@ inThisBuild(
     ),
     homepage := Some(url("https://github.com/cats4scala/cats-process")),
     licenses += ("MIT", url("http://opensource.org/licenses/MIT")),
-    pomIncludeRepository := { _ => false },
-    testFrameworks += new TestFramework("munit.Framework"),
-    scalacOptions in (Compile, doc) ++= Seq(
+    //pomIncludeRepository := { _ => false },
+    testFrameworks += new TestFramework("munit.Framework")
+    /*
+    Compile / doc / scalacOptions ++= Seq(
       "-groups",
       "-sourcepath",
-      (baseDirectory in LocalRootProject).value.getAbsolutePath,
+      (LocalRootProject / baseDirectory).value.getAbsolutePath,
       "-doc-source-url",
       "https://github.com/cats4scala/cats-process/blob/v" + version.value + "€{FILE_PATH}.scala"
     )
+    */
   )
 )
 
 addCommandAlias("fmt", """scalafmtSbt;scalafmtAll""")
 addCommandAlias("fmtCheck", """scalafmtSbtCheck;scalafmtCheckAll""")
+
+Global / onChangedBuildSource := ReloadOnSourceChanges

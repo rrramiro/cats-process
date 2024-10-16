@@ -2,11 +2,14 @@ package c4s.process
 
 import java.nio.file._
 import java.util.Comparator
-
 import cats.effect._
+import cats.effect.kernel.{Resource, Sync}
 import cats.syntax.all._
 import munit.CatsEffectSuite
+
 import java.io.File
+import java.util.concurrent.{ExecutorService, Executors}
+import scala.concurrent.ExecutionContext
 
 class ProcessSpec extends CatsEffectSuite {
   import c4s.process.syntax._
@@ -88,8 +91,8 @@ class ProcessSpec extends CatsEffectSuite {
     }
   }
 
-  val withProcess: Resource[IO, Process[IO]] =
-    Blocker[IO]
+  lazy val withProcess: Resource[IO, Process[IO]] =
+    fixedThreadPool[IO](3)
       .map(x => Process.impl[IO](x))
 
   def createTmpDirectory[F[_]: Sync]: Resource[F, Path] =
@@ -98,5 +101,13 @@ class ProcessSpec extends CatsEffectSuite {
         Files.walk(path).sorted(Comparator.reverseOrder()).map[File](_.toFile).map[Boolean](_.delete())
       }.void
     )
+
+  private def fixedThreadPool[F[_]](size: Int)(
+    implicit sf: Sync[F]
+  ): Resource[F, ExecutionContext] = {
+    val alloc = sf.delay(Executors.newFixedThreadPool(size))
+    val free  = (es: ExecutorService) => sf.delay(es.shutdown())
+    Resource.make(alloc)(free).map(ExecutionContext.fromExecutor)
+  }
 
 }

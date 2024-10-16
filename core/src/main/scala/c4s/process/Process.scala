@@ -1,14 +1,15 @@
 package c4s.process
 
-import cats.effect._
 import cats.syntax.all._
+import cats.effect._
+import cats.effect.syntax.all._
+import scala.concurrent.ExecutionContext
+
 import java.io.{InputStream, OutputStream}
 import java.nio.file.Path
-import fs2.Stream
-import fs2.io.writeOutputStream
 
 trait Process[F[_]] {
-  def run(command: String, input: Option[Stream[F, Byte]], path: Option[Path]): F[ProcessResult[F]]
+  def run(command: String, input: Option[fs2.Stream[F, Byte]], path: Option[Path]): F[ProcessResult[F]]
 }
 
 object Process {
@@ -17,28 +18,28 @@ object Process {
 
   final def run[F[_]: Process](command: String): F[ProcessResult[F]] = Process[F].run(command, None, None)
 
-  final def run[F[_]: Process](command: String, input: Stream[F, Byte]): F[ProcessResult[F]] =
+  final def run[F[_]: Process](command: String, input: fs2.Stream[F, Byte]): F[ProcessResult[F]] =
     Process[F].run(command, Some(input), None)
 
   final def runInPath[F[_]: Process](command: String, path: Path): F[ProcessResult[F]] =
     Process[F].run(command, None, path.some)
 
-  final def impl[F[_]: Concurrent: ContextShift: Extract](
-      blocker: Blocker
-  ): Process[F] = new ProcessImpl[F](blocker)
+  final def impl[F[_]: Async: Extract](
+                                             ec: ExecutionContext
+  ): Process[F] = new ProcessImpl[F](ec)
 
-  private[this] final class ProcessImpl[F[_]: Concurrent: ContextShift: Extract](
-      blocker: Blocker
+  private[this] final class ProcessImpl[F[_]: Async: Extract](
+      ec: ExecutionContext
   ) extends Process[F] {
     import java.util.concurrent.atomic.AtomicReference
-    val atomicReference = Sync[F].delay(new AtomicReference[Stream[F, Byte]])
+    val atomicReference = Sync[F].delay(new AtomicReference[fs2.Stream[F, Byte]])
 
-    override def run(command: String, input: Option[Stream[F, Byte]], path: Option[Path]): F[ProcessResult[F]] =
+    override def run(command: String, input: Option[fs2.Stream[F, Byte]], path: Option[Path]): F[ProcessResult[F]] =
       for {
         outputRef <- atomicReference
         errorRef <- atomicReference
         fout = toOutputStream(input)
-        exitValue <- Bracket[F, Throwable].bracket(Sync[F].delay {
+        exitValue <- Async[F].delay {
           val p = new ProcessIO(
             fout andThen (Extract[F].extract),
             redirectInputStream(outputRef, _),
@@ -46,27 +47,28 @@ object Process {
           )
           path.fold(
             ScalaProcess(command).run(p)
-          )(path => ScalaProcess(command, path.toFile()).run(p))
-        })(p => blocker.blockOn(Sync[F].delay(p.exitValue())))(p => Sync[F].delay(p.destroy()))
-        output <- Sync[F].delay(outputRef.get())
-        error <- Sync[F].delay(errorRef.get())
+          )(path => ScalaProcess(command, path.toFile).run(p))
+        }.bracket(p => Async[F].delay(p.exitValue()).evalOn(ec))(p => Async[F].delay(p.destroy()))
+        output <- Async[F].delay(outputRef.get())
+        error <- Async[F].delay(errorRef.get())
       } yield ProcessResult(ExitCode(exitValue), output, error)
 
-    private[this] def toOutputStream(opt: Option[Stream[F, Byte]]): OutputStream => F[Unit] =
+    private[this] def toOutputStream(opt: Option[fs2.Stream[F, Byte]]): OutputStream => F[Unit] =
       out =>
-        opt.fold(Sync[F].unit) { stream =>
+        opt.fold(Async[F].unit) { stream =>
           Resource
-            .fromAutoCloseableBlocking(blocker)(Sync[F].delay(out))
+            .fromAutoCloseable(Async[F].delay(out))
+            .evalOn(ec)
             .use { outStream =>
               stream
-                .through(writeOutputStream[F](Concurrent[F].delay(outStream), blocker, false))
+                .through(fs2.io.writeOutputStream[F](Async[F].delay(outStream), false))
                 .compile
                 .drain
             }
         }
 
     private[this] def redirectInputStream(
-        ref: AtomicReference[Stream[F, Byte]],
+        ref: AtomicReference[fs2.Stream[F, Byte]],
         is: InputStream
     ): Unit =
       try {
@@ -76,7 +78,7 @@ object Process {
           queue.enqueue(n.toByte)
           n = is.read()
         }
-        ref.set(Stream.fromIterator(queue.iterator))
+        ref.set(fs2.Stream.fromIterator[F](queue.iterator, 1024))
       } finally is.close()
   }
 }
